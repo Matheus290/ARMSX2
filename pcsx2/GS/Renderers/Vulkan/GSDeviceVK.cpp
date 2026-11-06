@@ -68,6 +68,84 @@ namespace
 #include "common/Path.h"
 #include "common/ScopedGuard.h"
 #include "common/Threading.h"
+
+#ifdef ARMSX2_RP_DIAG
+// Diagnostic only (build with -DARMSX2_RP_DIAG): who ends each render pass, and how many passes are
+// reopened on exactly the attachments the previous one had -- on a tiler each of those is a tile store
+// plus a tile load that bought nothing. Callers are logged as offsets into the binary, for addr2line.
+#include <algorithm>
+#include <dlfcn.h>
+#include <unordered_map>
+#include <vector>
+namespace
+{
+	struct RenderPassDiag
+	{
+		std::unordered_map<const void*, u64> end_callers;
+		std::unordered_map<const void*, u64> same_target_reopen;
+		const void* last_end_caller = nullptr;
+		const void* last_rt = nullptr;
+		const void* last_ds = nullptr;
+		VkFramebuffer last_fb = VK_NULL_HANDLE;
+		bool pending = false;
+		u64 begins = 0, ends = 0, same_targets = 0, same_fb = 0;
+		u32 frames = 0;
+	};
+	RenderPassDiag s_rp_diag;
+
+	void RenderPassDiagNoteBegin(const void* rt, const void* ds, VkFramebuffer fb)
+	{
+		RenderPassDiag& d = s_rp_diag;
+		d.begins++;
+		if (d.pending && rt == d.last_rt && ds == d.last_ds)
+		{
+			d.same_targets++;
+			d.same_target_reopen[d.last_end_caller]++;
+			if (fb == d.last_fb)
+				d.same_fb++;
+		}
+		d.pending = false;
+	}
+
+	void RenderPassDiagDumpTop(const char* title, const std::unordered_map<const void*, u64>& map, u32 frames)
+	{
+		std::vector<std::pair<const void*, u64>> v(map.begin(), map.end());
+		std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		Console.WriteLn("RPDIAG %s:", title);
+		for (size_t i = 0; i < v.size() && i < 12; i++)
+		{
+			Dl_info info = {};
+			uptr off = reinterpret_cast<uptr>(v[i].first);
+			if (dladdr(v[i].first, &info) && info.dli_fbase)
+				off -= reinterpret_cast<uptr>(info.dli_fbase);
+			Console.WriteLn("RPDIAG   +0x%llx  %.1f/frame", static_cast<unsigned long long>(off),
+				static_cast<double>(v[i].second) / frames);
+		}
+	}
+
+	void RenderPassDiagFrame()
+	{
+		RenderPassDiag& d = s_rp_diag;
+		if (++d.frames < 300)
+			return;
+		const double f = d.frames;
+		Console.WriteLn("RPDIAG %u frames: begins %.1f/frame, ends %.1f/frame, reopened on same rt+ds %.1f/frame "
+						"(same framebuffer %.1f/frame)",
+			d.frames, d.begins / f, d.ends / f, d.same_targets / f, d.same_fb / f);
+		RenderPassDiagDumpTop("end callers", d.end_callers, d.frames);
+		RenderPassDiagDumpTop("end callers followed by a reopen on the same rt+ds", d.same_target_reopen, d.frames);
+		const bool pending = d.pending;
+		const void *rt = d.last_rt, *ds = d.last_ds, *caller = d.last_end_caller;
+		const VkFramebuffer fb = d.last_fb;
+		d = {};
+		d.pending = pending;
+		d.last_rt = rt;
+		d.last_ds = ds;
+		d.last_end_caller = caller;
+		d.last_fb = fb;
+	}
+} // namespace
+#endif
 #include "common/Timer.h"
 
 #include "imgui.h"
@@ -3605,6 +3683,9 @@ GSDevice::PresentResult GSDeviceVK::DoBeginPresent(bool frame_skip)
 
 void GSDeviceVK::EndPresent()
 {
+#ifdef ARMSX2_RP_DIAG
+	RenderPassDiagFrame();
+#endif
 	RenderImGui();
 
 	VkCommandBuffer cmdbuffer = GetCurrentCommandBuffer();
@@ -8699,6 +8780,9 @@ void GSDeviceVK::BeginRenderPass(VkRenderPass rp, const GSVector4i& rect)
 {
 	if (m_current_render_pass != VK_NULL_HANDLE)
 		EndRenderPass();
+#ifdef ARMSX2_RP_DIAG
+	RenderPassDiagNoteBegin(m_current_render_target, m_current_depth_target, m_current_framebuffer);
+#endif
 
 	m_current_render_pass = rp;
 	m_loop_declared_in_pass = false;
@@ -8727,6 +8811,9 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, c
 {
 	if (m_current_render_pass != VK_NULL_HANDLE)
 		EndRenderPass();
+#ifdef ARMSX2_RP_DIAG
+	RenderPassDiagNoteBegin(m_current_render_target, m_current_depth_target, m_current_framebuffer);
+#endif
 
 	m_current_render_pass = rp;
 	m_loop_declared_in_pass = false;
@@ -8755,10 +8842,26 @@ void GSDeviceVK::BeginClearRenderPass(VkRenderPass rp, const GSVector4i& rect, f
 	BeginClearRenderPass(rp, rect, &cv, 1);
 }
 
+#ifdef ARMSX2_RP_DIAG
+[[gnu::noinline]]
+#endif
 void GSDeviceVK::EndRenderPass()
 {
 	if (m_current_render_pass == VK_NULL_HANDLE)
 		return;
+
+#ifdef ARMSX2_RP_DIAG
+	{
+		const void* caller = __builtin_return_address(0);
+		s_rp_diag.ends++;
+		s_rp_diag.end_callers[caller]++;
+		s_rp_diag.last_end_caller = caller;
+		s_rp_diag.last_rt = m_current_render_target;
+		s_rp_diag.last_ds = m_current_depth_target;
+		s_rp_diag.last_fb = m_current_framebuffer;
+		s_rp_diag.pending = true;
+	}
+#endif
 
 	m_current_render_pass = VK_NULL_HANDLE;
 	g_perfmon.Put(GSPerfMon::RenderPasses, 1);
