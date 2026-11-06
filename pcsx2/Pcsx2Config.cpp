@@ -940,6 +940,7 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(UserHacks_Limit24BitDepth) &&
 		OpEqu(UserHacks_BilinearHack) &&
 		OpEqu(OverrideTextureBarriers) &&
+		OpEqu(MaliLineExpandFix) &&
 		OpEqu(DepthFeedbackMode) &&
 		OpEqu(BackThread) &&
 
@@ -1006,6 +1007,7 @@ bool Pcsx2Config::GSOptions::IsRestartOption(const char* ini_key)
 		"ForceMaliFramebufferFetch",
 		"MaliOrderedInputAttachment",
 		"OverrideTextureBarriers",
+		"MaliLineExpandFix",
 		"DepthFeedbackMode",
 		"GSBackThreadMode",
 		"HWAA1",
@@ -1037,6 +1039,7 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(ForceMaliFramebufferFetch) &&
 		   OpEqu(MaliOrderedInputAttachment) &&
 		   OpEqu(OverrideTextureBarriers) &&
+		   OpEqu(MaliLineExpandFix) &&
 		   OpEqu(DepthFeedbackMode) &&
 		   OpEqu(BackThread) &&
 		   OpEqu(HWAA1) &&
@@ -1229,6 +1232,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapIntEnumEx(UserHacks_GPUTargetCLUTMode, "UserHacks_GPUTargetCLUTMode");
 	SettingsWrapIntEnumEx(TriFilter, "TriFilter");
 	SettingsWrapBitfieldEx(OverrideTextureBarriers, "OverrideTextureBarriers");
+	SettingsWrapBitfieldEx(MaliLineExpandFix, "MaliLineExpandFix");
 	SettingsWrapIntEnumEx(DepthFeedbackMode, "DepthFeedbackMode");
 	// An integer on disk: 0 is off, any other value on. Older builds stored a four-way mode whose
 	// "on" value was 3, and the settings UIs bind the key as an integer.
