@@ -532,6 +532,9 @@ void FullscreenUI::UpdateGameDetails(std::string path, std::string serial, std::
 
 void FullscreenUI::PauseForMenuOpen(bool set_pause_menu_open)
 {
+#ifndef _WIN32
+	RefreshMenuClockFormat();
+#endif
 	s_was_paused_on_quick_menu_open = (VMManager::GetState() == VMState::Paused);
 	if (Host::GetBoolSettingValue("UI", "PauseOnMenu", true) && !s_was_paused_on_quick_menu_open)
 		Host::RunOnCPUThread([]() { VMManager::SetPaused(true); });
@@ -564,9 +567,6 @@ void FullscreenUI::OpenPauseMenu()
 
 		PauseForMenuOpen(true);
 		ForceKeyNavEnabled();
-#ifndef _WIN32
-		RefreshMenuClockFormat();
-#endif
 		if (s_menu_resume.window != MainWindowType::None)
 		{
 			// Back to the window, page and item the hotkey left.
