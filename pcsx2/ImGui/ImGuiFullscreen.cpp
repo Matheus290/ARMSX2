@@ -810,6 +810,20 @@ bool ImGuiFullscreen::ResetFocusHere()
 	s_focus_reset_queued = FocusResetType::None;
 	ImGui::SetWindowFocus();
 
+	// only do the active selection magic when we're using keyboard/gamepad
+	ImGuiContext& g = *GImGui;
+	const bool keyboard_or_gamepad =
+		(g.NavInputSource == ImGuiInputSource_Keyboard || g.NavInputSource == ImGuiInputSource_Gamepad);
+
+	// Show the selection on a window that just took the focus. While no window takes navigation input (a game running
+	// under a closed menu) ImGui hides the cursor every frame, and whether the first navigation update after the menu
+	// opens still sees that depends on timing: the item had the focus but no highlight until the first d-pad press.
+	if (keyboard_or_gamepad)
+	{
+		g.NavCursorVisible = true;
+		g.NavHighlightItemUnderNav = true;
+	}
+
 	// Focusing the window alone lands on the first item in view, so a restored item is set explicitly. The caller's
 	// default-selection logic is skipped, since the item to select is already chosen.
 	if (s_restore_focus_id != 0)
@@ -817,16 +831,16 @@ bool ImGuiFullscreen::ResetFocusHere()
 		ImGui::SetFocusID(s_restore_focus_id, ImGui::GetCurrentWindow());
 		// The window appearing queued a navigation init, which at the end of the frame would select the first
 		// item in view and replace the one just set.
-		ImGuiContext& g = *GImGui;
 		g.NavInitRequest = false;
 		g.NavInitRequestFromMove = false;
 		g.NavInitResult.ID = 0;
+		if (keyboard_or_gamepad)
+			g.NavCursorVisible = true;
 		s_restore_focus_id = 0;
 		return false;
 	}
 
-	// only do the active selection magic when we're using keyboard/gamepad
-	return (GImGui->NavInputSource == ImGuiInputSource_Keyboard || GImGui->NavInputSource == ImGuiInputSource_Gamepad);
+	return keyboard_or_gamepad;
 }
 
 bool ImGuiFullscreen::IsFocusResetQueued()
